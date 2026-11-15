@@ -10,6 +10,7 @@
     --line:#3a3526; --text:#f1ece0; --muted:#9a9384;
     --amber:#e9a23b; --amber-dim:#7a5a1f;
     --found:#5dcaa5; --found-bg:#16302a; --found-line:#2c5c4f;
+    --p1:#ec8fc4; --p1-bg:#351a2c; --p1-line:#70375a;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
   body{margin:0; background:var(--bg); color:var(--text);
@@ -20,7 +21,8 @@
   h1{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-size:22px; font-weight:600; letter-spacing:0.08em; margin:0;}
   h1 .dot{color:var(--amber);}
   .count{font-family:ui-monospace,monospace; font-size:13px; color:var(--muted); white-space:nowrap;}
-  .count.win{color:var(--found); font-weight:600;}
+  .count.win{font-weight:600;}
+  .count .c0{color:var(--found);} .count .c1{color:var(--p1);}
   .codebar{display:flex; gap:8px; align-items:center; margin:14px 0 16px;
     background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:8px 10px; flex-wrap:wrap;}
   .codebar label{font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:0.1em;}
@@ -43,7 +45,10 @@
     transition:background .12s, border-color .12s, color .12s; user-select:none;}
   .cell:hover{border-color:var(--amber-dim);}
   .cell.on{background:var(--found-bg); border-color:var(--found-line); color:var(--found); font-weight:600;}
-  .cell.win{background:#1d4d40; border-color:var(--found); color:#bff0e2; font-weight:600;}
+  .cell.on.p1{background:var(--p1-bg); border-color:var(--p1-line); color:var(--p1);}
+  .cell.on.win{border-color:var(--amber); box-shadow:0 0 0 1px var(--amber) inset;}
+  .chip{width:36px; padding:8px 0; font-size:16px; line-height:1;}
+  .chip.p0{color:var(--found);} .chip.p1{color:var(--p1);}
   .banner{margin:16px 0 0; text-align:center; font-family:ui-monospace,monospace; font-size:18px;
     font-weight:600; letter-spacing:0.15em; color:var(--found); height:24px; opacity:0; transition:opacity .2s;}
   .banner.show{opacity:1;}
@@ -64,6 +69,7 @@
   <div class="codebar">
     <label for="code">Raum</label>
     <input id="code" maxlength="6" spellcheck="false" autocomplete="off">
+    <button id="player" class="chip p0" title="Deine Farbe wechseln">●</button>
     <button id="share" class="accent">Teilen</button>
     <button id="new">Neu</button>
   </div>
@@ -72,6 +78,7 @@
   <div class="banner" id="banner">BINGO!</div>
   <p class="hint">
     Gleicher <b>Raum-Code</b> = gemeinsames Brett. Hakt einer ab, sieht's der andere sofort.
+    Der <b>farbige Punkt</b> zeigt deine Farbe, ein Klick darauf wechselt sie.
     Alle 25 voll &rarr; <b>Komplett</b>.
   </p>
 </div>
@@ -143,11 +150,11 @@ function hashStr(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt
 function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
 function randCode(){const c="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";let s="";const r=mulberry32(hashStr(Date.now()+""+Math.random()));for(let i=0;i<4;i++)s+=c[Math.floor(r()*c.length)];return s;}
 
-let code="", board=[], marked=new Set();
+let code="", board=[], marked=new Map(), player=0;
 let source=null, stamps=new Map();
 const grid=document.getElementById('grid'), countEl=document.getElementById('count'),
       banner=document.getElementById('banner'), codeInput=document.getElementById('code'),
-      statusbar=document.getElementById('statusbar');
+      statusbar=document.getElementById('statusbar'), playerBtn=document.getElementById('player');
 
 const lines=[];
 for(let r=0;r<5;r++)lines.push([0,1,2,3,4].map(c=>r*5+c));
@@ -167,13 +174,14 @@ function render(){
   board.forEach((text,i)=>{
     const d=document.createElement('div');
     const on=marked.has(i), inWin=win.has(i);
-    d.className="cell"+(inWin?" win":(on?" on":""));
+    d.className="cell"+(on?" on p"+marked.get(i):"")+(inWin?" win":"");
     d.textContent=text;
     d.onclick=()=>toggle(i);
     grid.appendChild(d);
   });
   const found=marked.size, full=found>=SIZE, hasWin=win.size>0;
-  countEl.textContent=found+" / "+SIZE; countEl.classList.toggle("win",hasWin||full);
+  const score=[0,0]; marked.forEach(p=>score[p]++);
+  countEl.innerHTML='<span class="c0">'+score[0]+'</span> · <span class="c1">'+score[1]+'</span> / '+SIZE; countEl.classList.toggle("win",hasWin||full);
   banner.textContent=full?"KOMPLETT!":"BINGO!";
   banner.classList.toggle("show",hasWin||full);
 }
@@ -182,25 +190,43 @@ function topic(){return "mb-"+code.toLowerCase()+"-"+hashStr("room:"+code).toStr
 function setStatus(live){
   statusbar.innerHTML=live?'<span class="online">● live verbunden</span>':'<span class="local">● offline – Änderungen nur lokal</span>';
 }
-function apply(i,on,ts){
+function setPlayer(p){
+  player=p===1?1:0;
+  try{localStorage.setItem("bingo:player",String(player));}catch(e){}
+  playerBtn.className="chip p"+player;
+}
+function readHash(){
+  const h=location.hash.replace('#','');
+  const m=h.match(/^([A-Za-z0-9]+)-([01])$/);
+  if(!m)return h;
+  setPlayer(Number(m[2]));
+  return m[1];
+}
+function apply(i,on,ts,p){
   if(!Number.isInteger(i)||i<0||i>=SIZE||typeof ts!=="number")return false;
   if(ts<(stamps.get(i)||0))return false;
   stamps.set(i,ts);
-  on?marked.add(i):marked.delete(i);
+  on?marked.set(i,p===1?1:0):marked.delete(i);
   return true;
 }
-function publish(i,on,ts){
-  fetch(SYNC_HOST+"/"+topic(),{method:"POST",body:JSON.stringify({i,on,ts})}).catch(()=>setStatus(false));
+function publish(i,on,ts,p){
+  fetch(SYNC_HOST+"/"+topic(),{method:"POST",body:JSON.stringify({i,on,ts,p})}).catch(()=>setStatus(false));
 }
 function toggle(i){
   const on=!marked.has(i);
   const ts=Math.max(Date.now(),(stamps.get(i)||0)+1);
-  apply(i,on,ts); saveLocal(); render(); publish(i,on,ts);
+  apply(i,on,ts,player); saveLocal(); render(); publish(i,on,ts,player);
 }
 function saveLocal(){try{localStorage.setItem("bingo:"+code,JSON.stringify([...marked]));}catch(e){}}
 function loadLocal(){
-  try{const v=localStorage.getItem("bingo:"+code);return new Set((v?JSON.parse(v):[]).filter(i=>Number.isInteger(i)&&i>=0&&i<SIZE));}
-  catch(e){return new Set();}
+  const m=new Map();
+  try{
+    for(const e of JSON.parse(localStorage.getItem("bingo:"+code)||"[]")){
+      const [i,p]=Array.isArray(e)?e:[e,0];
+      if(Number.isInteger(i)&&i>=0&&i<SIZE)m.set(i,p===1?1:0);
+    }
+  }catch(e){}
+  return m;
 }
 
 function listen(){
@@ -211,7 +237,7 @@ function listen(){
   source.onmessage=e=>{
     try{
       const m=JSON.parse(JSON.parse(e.data).message);
-      if(apply(m.i,!!m.on,m.ts)){saveLocal();render();}
+      if(apply(m.i,!!m.on,m.ts,m.p)){saveLocal();render();}
     }catch(err){}
   };
 }
@@ -230,14 +256,16 @@ codeInput.addEventListener('keydown',e=>{if(e.key==='Enter')codeInput.blur();});
 document.getElementById('new').onclick=()=>{if(confirm("Neuen Raum öffnen? Schick der anderen den neuen Code."))setCode(randCode());};
 document.getElementById('share').onclick=async()=>{
   const base=location.href.split('#')[0];
-  const msg="Lass uns Maps-Bingo spielen! Raum: "+code+"\n"+base+"#"+code;
+  const msg="Lass uns Maps-Bingo spielen! Raum: "+code+"\n"+base+"#"+code+"-"+(1-player);
   try{await navigator.clipboard.writeText(msg);toast("Einladung kopiert");}
   catch(e){prompt("Kopiere diese Einladung:",msg);}
 };
 
-window.addEventListener('hashchange',()=>{const c=location.hash.replace('#','');if(c&&c.toUpperCase()!==code)setCode(c);});
+playerBtn.onclick=()=>{setPlayer(1-player);toast("Farbe gewechselt");};
+window.addEventListener('hashchange',()=>{const c=readHash();if(c&&c.toUpperCase()!==code)setCode(c);});
+try{setPlayer(localStorage.getItem("bingo:player")==="1"?1:0);}catch(e){setPlayer(0);}
 setStatus(false);
-setCode(location.hash.replace('#','') || "");
+setCode(readHash() || "");
 </script>
 </body>
 </html>
